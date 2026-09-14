@@ -1,0 +1,6 @@
+/graph-log-watcher
+*.test
+*.out
+coverage.*
+state.db
+state.db.*
