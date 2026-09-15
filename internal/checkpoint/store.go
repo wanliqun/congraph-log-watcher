@@ -36,13 +36,15 @@ type Config struct {
 	Path          string
 	FlushInterval time.Duration
 	FlushEvents   int
+	OnFlushStatus func(error)
 }
 
 // Store batches checkpoint writes and flushes by either event count or time.
 type Store struct {
-	db       *bolt.DB
-	interval time.Duration
-	limit    int
+	db            *bolt.DB
+	interval      time.Duration
+	limit         int
+	onFlushStatus func(error)
 
 	mu      sync.Mutex
 	pending map[string]ContainerCheckpoint
@@ -79,7 +81,7 @@ func Open(config Config) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize checkpoint database: %w", err)
 	}
-	store := &Store{db: db, interval: config.FlushInterval, limit: config.FlushEvents, pending: make(map[string]ContainerCheckpoint), stop: make(chan struct{}), done: make(chan struct{})}
+	store := &Store{db: db, interval: config.FlushInterval, limit: config.FlushEvents, onFlushStatus: config.OnFlushStatus, pending: make(map[string]ContainerCheckpoint), stop: make(chan struct{}), done: make(chan struct{})}
 	go store.flushLoop()
 	return store, nil
 }
@@ -210,7 +212,14 @@ func (s *Store) flushLoop() {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			_ = s.Flush()
+			err := s.Flush()
+			if s.onFlushStatus != nil {
+				if err != nil {
+					s.onFlushStatus(err)
+				} else {
+					s.onFlushStatus(s.Err())
+				}
+			}
 		}
 	}
 }

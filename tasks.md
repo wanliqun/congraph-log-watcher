@@ -42,7 +42,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-01：仓库脚手架与核心数据契约
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** 无
 
 ### 目标
@@ -73,7 +73,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-02：配置加载、默认值及 `check-config`
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-01
 
 ### 目标
@@ -109,7 +109,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-03：graph-node Parser 与 Level Router
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-01
 
 ### 目标
@@ -141,7 +141,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-04：Redaction 与 Context Buffer
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-02、PR-03
 
 ### 目标
@@ -172,7 +172,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-05：Rule Matcher、Normalization 与 Fingerprint
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-02、PR-03
 
 ### 目标
@@ -205,7 +205,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-06：Sliding Window、Cooldown 与有界聚合状态
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-02、PR-05
 
 ### 目标
@@ -237,7 +237,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-07：Source-independent Detection Pipeline 与 Dry Run
 
-**优先级：** P0  
+**优先级：** P0\\
 **前置依赖：** PR-03、PR-04、PR-05、PR-06
 
 ### 目标
@@ -269,7 +269,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-08：Docker LogSource、容器发现及重建检测
 
-**优先级：** P0/P1  
+**优先级：** P0/P1\\
 **前置依赖：** PR-01、PR-02、PR-03
 
 ### 目标
@@ -302,7 +302,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-09：bbolt Checkpoint、Replay 与 Container Recreate 恢复
 
-**优先级：** P1  
+**优先级：** P1\\
 **前置依赖：** PR-02、PR-08
 
 ### 目标
@@ -336,7 +336,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-10：异步通知、DingTalk Adapter 与 Safety Valve
 
-**优先级：** P2  
+**优先级：** P2\\
 **前置依赖：** PR-02、PR-07
 
 ### 目标
@@ -370,7 +370,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-11：Prometheus、Health Check 与结构化日志
 
-**优先级：** P3  
+**优先级：** P3\\
 **前置依赖：** PR-07、PR-08、PR-09、PR-10
 
 ### 目标
@@ -412,7 +412,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-12：Runtime 组装与 Graceful Shutdown
 
-**优先级：** P1/P3  
+**优先级：** P1/P3\\
 **前置依赖：** PR-07、PR-08、PR-09、PR-10、PR-11
 
 ### 目标
@@ -450,7 +450,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-13：Docker 部署、示例配置与 README
 
-**优先级：** P3  
+**优先级：** P3\\
 **前置依赖：** PR-12
 
 ### 目标
@@ -488,7 +488,7 @@ Source-independent Processor 接收 `RawLog`，输出 checkpoint ack 和 `Alert`
 
 ## [ ] PR-14：MVP 验收套件与压力场景
 
-**优先级：** P0～P3  
+**优先级：** P0～P3\\
 **前置依赖：** PR-12、PR-13
 
 ### 目标
@@ -585,4 +585,3 @@ Wave 9:         PR-14
 - AI 日志分析和自动故障修复。
 - Confura、Congraph、IPFS 的跨系统关联分析。
 - 聚合窗口、cooldown、context 的跨进程持久化。
-

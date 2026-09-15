@@ -51,6 +51,32 @@ func TestTimedAndCloseFlush(t *testing.T) {
 	}
 }
 
+func TestTimedFlushReportsFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	flushErrors := make(chan error, 1)
+	store, err := Open(Config{Path: path, FlushInterval: 100 * time.Millisecond, FlushEvents: 100, OnFlushStatus: func(err error) {
+		flushErrors <- err
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Save(testCheckpoint("node", "id", time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-flushErrors:
+		if err == nil {
+			t.Fatal("flush failure callback received nil")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed flush failure was not reported")
+	}
+}
+
 func TestCheckpointDoesNotPersistRawLogs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	store := openStore(t, path, time.Hour, 1)

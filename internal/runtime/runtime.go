@@ -30,7 +30,17 @@ import (
 
 // Run owns the production lifecycle and drains accepted work on cancellation.
 func Run(ctx context.Context, cfg *config.Config, dry bool, output io.Writer) error {
-	store, err := checkpoint.Open(checkpoint.Config{Path: cfg.Checkpoint.Path, FlushInterval: cfg.Checkpoint.FlushInterval.Duration(), FlushEvents: cfg.Checkpoint.FlushEvents})
+	reg := prometheus.NewRegistry()
+	m := metrics.New(reg)
+	health := metrics.NewHealth(cfg.Containers, cfg.Health.DockerUnavailableAfter.Duration(), cfg.Health.AllContainersDetachedAfter.Duration())
+	store, err := checkpoint.Open(checkpoint.Config{
+		Path:          cfg.Checkpoint.Path,
+		FlushInterval: cfg.Checkpoint.FlushInterval.Duration(),
+		FlushEvents:   cfg.Checkpoint.FlushEvents,
+		OnFlushStatus: func(err error) {
+			health.CheckpointOK(err == nil)
+		},
+	})
 	if err != nil {
 		return err
 	}
@@ -41,9 +51,6 @@ func Run(ctx context.Context, cfg *config.Config, dry bool, output io.Writer) er
 		}
 	}()
 
-	reg := prometheus.NewRegistry()
-	m := metrics.New(reg)
-	health := metrics.NewHealth(cfg.Containers, cfg.Health.DockerUnavailableAfter.Duration(), cfg.Health.AllContainersDetachedAfter.Duration())
 	redactor, compiled, gate, contexts, agg, err := buildPipelineParts(cfg)
 	if err != nil {
 		return err
@@ -138,12 +145,29 @@ running:
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.Shutdown.Timeout.Duration())
 	defer cancelShutdown()
 	cancelSource()
-	for raw := range logs {
-		if err := processRaw(p, store, observer, raw); err != nil && runErr == nil {
-			runErr = err
+	logsOpen := true
+	sourceRunning := true
+	for logsOpen || sourceRunning {
+		select {
+		case raw, ok := <-logs:
+			if !ok {
+				logsOpen = false
+				continue
+			}
+			if err := processRaw(p, store, observer, raw); err != nil && runErr == nil {
+				runErr = err
+			}
+		case err, ok := <-sourceDone:
+			sourceRunning = false
+			if ok && err != nil && !errors.Is(err, context.Canceled) && runErr == nil {
+				runErr = fmt.Errorf("stop Docker log source: %w", err)
+			}
+		case <-shutdownCtx.Done():
+			runErr = errors.Join(runErr, fmt.Errorf("drain Docker log source: %w", shutdownCtx.Err()))
+			logsOpen = false
+			sourceRunning = false
 		}
 	}
-	<-sourceDone
 
 	p.Close()
 	if err := store.Flush(); err != nil {

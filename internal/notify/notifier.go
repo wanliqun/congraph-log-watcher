@@ -17,6 +17,12 @@ type Notifier interface {
 	Notify(context.Context, processor.Alert) error
 }
 
+// RetryNotifier can retry delivery internally while retaining successful
+// sub-deliveries from earlier attempts.
+type RetryNotifier interface {
+	NotifyWithRetries(context.Context, processor.Alert, []time.Duration) error
+}
+
 // MultiNotifier delivers an alert to every configured channel.
 type MultiNotifier []Notifier
 
@@ -28,6 +34,31 @@ func (m MultiNotifier) Notify(ctx context.Context, alert processor.Alert) error 
 		}
 	}
 	return result
+}
+
+// NotifyWithRetries retries each configured channel independently. A channel
+// that has already accepted an alert is never called again for that alert.
+func (m MultiNotifier) NotifyWithRetries(ctx context.Context, alert processor.Alert, retries []time.Duration) error {
+	var result error
+	for _, notifier := range m {
+		if err := notifyWithRetries(ctx, notifier, alert, retries); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
+func notifyWithRetries(ctx context.Context, notifier Notifier, alert processor.Alert, retries []time.Duration) error {
+	for attempt := 0; ; attempt++ {
+		if err := notifier.Notify(ctx, alert); err == nil {
+			return nil
+		} else if attempt == len(retries) {
+			return err
+		}
+		if !sleep(ctx, retries[attempt]) {
+			return ctx.Err()
+		}
+	}
 }
 
 // Clock makes safety-valve behavior deterministic in tests.
@@ -262,6 +293,9 @@ func (w *Worker) sendStorm(ctx context.Context, source processor.Alert) {
 }
 
 func (w *Worker) send(ctx context.Context, alert processor.Alert) bool {
+	if notifier, ok := w.notifier.(RetryNotifier); ok {
+		return notifier.NotifyWithRetries(ctx, alert, w.retries) == nil
+	}
 	for attempt := 0; ; attempt++ {
 		if err := w.notifier.Notify(ctx, alert); err == nil {
 			return true
