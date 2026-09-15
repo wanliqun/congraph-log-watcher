@@ -224,17 +224,17 @@ func (p *Processor) addAfterContext(entry logentry.LogEntry) {
 func (p *Processor) awaitContext(key string, pending *pendingAlert) {
 	defer p.wait.Done()
 	capture, ok := <-pending.collector.Done()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if !ok || pending.discard {
 		return
 	}
-	p.mu.Lock()
 	if items := p.pending[key]; items != nil {
 		delete(items, pending)
 		if len(items) == 0 {
 			delete(p.pending, key)
 		}
 	}
-	p.mu.Unlock()
 	pending.alert.Context = capture.Lines(pending.maxBytes)
 	p.emit(pending.alert)
 }

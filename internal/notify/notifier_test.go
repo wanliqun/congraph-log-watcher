@@ -64,6 +64,27 @@ func TestRetryAndQueuePressure(t *testing.T) {
 	close(block)
 	_ = full.Close(context.Background())
 }
+
+func TestMultiNotifierRetriesOnlyFailedChannel(t *testing.T) {
+	success := &fakeNotifier{}
+	failsOnce := &fakeNotifier{failures: 1}
+	w, err := NewWorker(Config{Notifier: MultiNotifier{success, failsOnce}, QueueSize: 1, MaxAlertsPerMinute: 20, StormCooldown: time.Minute, RetryDelays: []time.Duration{0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.Submit(processor.Alert{RuleID: "a"}) {
+		t.Fatal("Submit failed")
+	}
+	if err := w.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := success.count(); got != 1 {
+		t.Fatalf("successful channel calls = %d, want 1", got)
+	}
+	if got := failsOnce.count(); got != 2 {
+		t.Fatalf("failed channel calls = %d, want 2", got)
+	}
+}
 func TestSafetyValveAndMarkdown(t *testing.T) {
 	c := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	n := &fakeNotifier{}
