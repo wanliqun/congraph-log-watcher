@@ -58,7 +58,7 @@ func TestRunReportsCommandUsageErrors(t *testing.T) {
 		{name: "missing command", want: "usage:"},
 		{name: "unknown command", args: []string{"unknown"}, want: "unknown command"},
 		{name: "missing config", args: []string{"check-config"}, want: "--config is required"},
-		{name: "run unavailable", args: []string{"run"}, want: "not available"},
+		{name: "run requires config", args: []string{"run"}, want: "--config is required"},
 	}
 
 	for _, tt := range tests {
