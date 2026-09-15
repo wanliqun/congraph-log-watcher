@@ -88,8 +88,8 @@ func TestReplayGateMarkerMissingAndContainerRecreation(t *testing.T) {
 
 	missing := NewReplayGate(checkpoint)
 	missing.Accept(first)
-	if got := missing.Finish(); len(got) != 1 || got[0].Raw != "first" {
-		t.Fatalf("missing marker replay = %#v", got)
+	if got := missing.Accept(rawAt("id-a", 3, "after missing")); len(got) != 2 || got[0].Raw != "first" || got[1].Raw != "after missing" {
+		t.Fatalf("missing marker live transition = %#v", got)
 	}
 	recreated := NewReplayGate(checkpoint)
 	if got := recreated.Accept(rawAt("id-b", 1, "new")); len(got) != 1 || got[0].Raw != "new" {

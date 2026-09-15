@@ -1,14 +1,75 @@
-containers: [index-node-0]
+docker:
+  socket: unix:///var/run/docker.sock
+containers: [index-node-0, query-node-0]
+parser: {type: graph-node}
+levels:
+  context: [INFO, WARN, ERROR, CRITICAL]
+  alert_candidates: [WARN, ERROR, CRITICAL]
+checkpoint:
+  path: /var/lib/graph-log-watcher/state.db
+  replay_overlap: 2s
+  flush_interval: 1s
+  flush_events: 100
+aggregation: {max_groups: 10000, group_ttl: 24h, max_samples: 3}
+context: {buffer_lines: 100}
+redaction:
+  rules:
+    - pattern: '(?i)(authorization:\s*bearer\s+)[^\s]+'
+      replace: '$1[REDACTED]'
+    - pattern: '(?i)(https?://[^:/\s]+:)[^@/\s]+@'
+      replace: '$1[REDACTED]@'
 rules:
   - id: critical-log
     severity: critical
+    match: {levels: [CRITICAL]}
     threshold: 1
     window: 1m
     cooldown: 10m
-    dedup: {mode: normalized}
-    match: {levels: [CRITICAL]}
+    dedup:
+      mode: normalized
+      normalize: [{pattern: '\b\d+\b', replace: '#'}]
+    context: {before: 20, after: 10, after_wait: 2s, max_bytes: 16384}
+    stop_on_match: true
+  - id: rpc-error
+    severity: high
+    match: {levels: [ERROR], pattern: '(?i)rpc|json-rpc|ethereum call'}
+    threshold: 3
+    window: 2m
+    cooldown: 10m
+    dedup: {mode: fields, fields: [rule, container, component, subgraph_id]}
+    context: {before: 10, after: 5, after_wait: 2s, max_bytes: 16384}
+    stop_on_match: true
+  - id: generic-error
+    severity: high
+    match: {levels: [ERROR]}
+    threshold: 5
+    window: 5m
+    cooldown: 15m
+    dedup:
+      mode: normalized
+      normalize:
+        - {pattern: '0x[0-9a-fA-F]+', replace: '0x#'}
+        - {pattern: '\b\d+\b', replace: '#'}
+    context: {before: 10, after: 5, after_wait: 2s, max_bytes: 16384}
+  - id: repeated-warning
+    severity: medium
+    match: {levels: [WARN]}
+    threshold: 20
+    window: 5m
+    cooldown: 15m
+    dedup: {mode: fields, fields: [rule, container, component, subgraph_id]}
+    context: {before: 10, after: 3, after_wait: 2s, max_bytes: 16384}
 alert:
+  custom_tags: [graph-node]
   channels:
     dingtalk:
       platform: dingtalk
       webhook: ${DINGTALK_WEBHOOK}
+      secret: ${DINGTALK_SECRET}
+      atMobiles: []
+      isAtAll: false
+notifier: {queue_size: 100, max_alerts_per_minute: 20, storm_cooldown: 1m}
+metrics: {listen: ':9108'}
+health: {docker_unavailable_after: 1m, all_containers_detached_after: 1m}
+runtime: {log_channel_size: 10000}
+shutdown: {timeout: 10s}

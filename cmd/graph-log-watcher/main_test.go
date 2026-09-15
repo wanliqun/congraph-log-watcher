@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +76,17 @@ func TestRunReportsCommandUsageErrors(t *testing.T) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestHealthcheckCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	var stderr bytes.Buffer
+	if got := run([]string{"healthcheck", "--url", server.URL}, io.Discard, &stderr); got != 0 {
+		t.Fatalf("exit=%d stderr=%q", got, stderr.String())
 	}
 }
 

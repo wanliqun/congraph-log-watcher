@@ -44,8 +44,18 @@ type Config struct {
 	Containers     []string
 	Output         chan<- logentry.RawLog
 	ReplayStarts   map[string]time.Time
+	ReplayStart    func(string) time.Time
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
+	Observer       Observer
+}
+
+// Observer receives bounded operational state changes. Implementations must
+// return quickly; callbacks run on source goroutines.
+type Observer interface {
+	DockerAvailable()
+	ContainerAttached(string, string, bool)
+	ContainerReconnect(string)
 }
 
 // LogSource reads each target container in its own goroutine. Sending to
@@ -55,8 +65,10 @@ type LogSource struct {
 	containers   []string
 	output       chan<- logentry.RawLog
 	replayStarts map[string]time.Time
+	replayStart  func(string) time.Time
 	initial      time.Duration
 	max          time.Duration
+	observer     Observer
 
 	mu    sync.Mutex
 	wakes map[string]chan struct{}
@@ -97,7 +109,7 @@ func New(config Config) (*LogSource, error) {
 		}
 		wakes[name] = make(chan struct{}, 1)
 	}
-	return &LogSource{api: config.API, containers: normalizedNames(config.Containers), output: config.Output, replayStarts: starts, initial: config.InitialBackoff, max: config.MaxBackoff, wakes: wakes}, nil
+	return &LogSource{api: config.API, containers: normalizedNames(config.Containers), output: config.Output, replayStarts: starts, replayStart: config.ReplayStart, initial: config.InitialBackoff, max: config.MaxBackoff, observer: config.Observer, wakes: wakes}, nil
 }
 
 // Run starts lifecycle watching and one sequential stream manager per logical
@@ -123,9 +135,14 @@ func (s *LogSource) Run(ctx context.Context) error {
 
 func (s *LogSource) runContainer(ctx context.Context, name string) {
 	backoff := s.initial
+	attachedOnce := false
 	for ctx.Err() == nil {
 		container, err := s.discover(ctx, name)
 		if err != nil {
+			s.observeAttached(name, "", false)
+			if attachedOnce {
+				s.observeReconnect(name)
+			}
 			if !wait(ctx, s.wakes[name], backoff) {
 				return
 			}
@@ -133,6 +150,8 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 			continue
 		}
 		backoff = s.initial
+		attachedOnce = true
+		s.observeAttached(name, container.ID, true)
 		streamCtx, cancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
 		go func() {
@@ -148,10 +167,14 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 			// fresh list/inspect before continuing the old stream.
 			cancel()
 			<-done
+			s.observeAttached(name, container.ID, false)
+			s.observeReconnect(name)
 		case <-done:
 			// A closed log follow stream is normally a daemon or container
 			// transition. Back off before rediscovery to avoid a tight loop.
 			cancel()
+			s.observeAttached(name, container.ID, false)
+			s.observeReconnect(name)
 			if !wait(ctx, s.wakes[name], backoff) {
 				return
 			}
@@ -164,6 +187,9 @@ func (s *LogSource) discover(ctx context.Context, name string) (Container, error
 	containers, err := s.api.List(ctx)
 	if err != nil {
 		return Container{}, err
+	}
+	if s.observer != nil {
+		s.observer.DockerAvailable()
 	}
 	for _, item := range containers {
 		if !hasName(item.Names, name) {
@@ -181,8 +207,24 @@ func (s *LogSource) discover(ctx context.Context, name string) (Container, error
 	return Container{}, fmt.Errorf("container %q not found", name)
 }
 
+func (s *LogSource) observeAttached(name, id string, attached bool) {
+	if s.observer != nil {
+		s.observer.ContainerAttached(name, id, attached)
+	}
+}
+
+func (s *LogSource) observeReconnect(name string) {
+	if s.observer != nil {
+		s.observer.ContainerReconnect(name)
+	}
+}
+
 func (s *LogSource) stream(ctx context.Context, name string, container Container) error {
-	reader, err := s.api.Logs(ctx, container.ID, s.replayStarts[name])
+	start := s.replayStarts[name]
+	if s.replayStart != nil {
+		start = s.replayStart(name)
+	}
+	reader, err := s.api.Logs(ctx, container.ID, start)
 	if err != nil {
 		return err
 	}

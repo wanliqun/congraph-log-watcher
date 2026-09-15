@@ -4,6 +4,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,6 +15,19 @@ import (
 // Notifier is the project's stable external-notification boundary.
 type Notifier interface {
 	Notify(context.Context, processor.Alert) error
+}
+
+// MultiNotifier delivers an alert to every configured channel.
+type MultiNotifier []Notifier
+
+func (m MultiNotifier) Notify(ctx context.Context, alert processor.Alert) error {
+	var result error
+	for _, notifier := range m {
+		if err := notifier.Notify(ctx, alert); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 // Clock makes safety-valve behavior deterministic in tests.
@@ -31,6 +45,15 @@ type Config struct {
 	StormCooldown      time.Duration
 	RetryDelays        []time.Duration
 	Clock              Clock
+	Observer           Observer
+}
+
+// Observer receives notification outcomes for metrics.
+type Observer interface {
+	NotificationSent(processor.Alert)
+	NotificationFailed(processor.Alert)
+	NotificationDropped(processor.Alert)
+	NotificationQueueSize(int)
 }
 
 // Stats is a snapshot of observable worker outcomes.
@@ -50,6 +73,7 @@ type Worker struct {
 	limit    int
 	stormFor time.Duration
 	clock    Clock
+	observer Observer
 
 	mu      sync.Mutex
 	closed  bool
@@ -58,6 +82,7 @@ type Worker struct {
 	stormAt time.Time
 	stop    context.CancelFunc
 	done    chan struct{}
+	stormWG sync.WaitGroup
 }
 
 // NewWorker starts an asynchronous notification worker.
@@ -86,7 +111,7 @@ func NewWorker(config Config) (*Worker, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &Worker{notifier: config.Notifier, queue: make(chan processor.Alert, config.QueueSize), retries: append([]time.Duration(nil), config.RetryDelays...), limit: config.MaxAlertsPerMinute, stormFor: config.StormCooldown, clock: config.Clock, stop: cancel, done: make(chan struct{})}
+	worker := &Worker{notifier: config.Notifier, queue: make(chan processor.Alert, config.QueueSize), retries: append([]time.Duration(nil), config.RetryDelays...), limit: config.MaxAlertsPerMinute, stormFor: config.StormCooldown, clock: config.Clock, observer: config.Observer, stop: cancel, done: make(chan struct{})}
 	go worker.run(ctx)
 	return worker, nil
 }
@@ -101,13 +126,18 @@ func (w *Worker) Submit(alert processor.Alert) bool {
 	defer w.mu.Unlock()
 	if w.closed {
 		w.stats.Dropped++
+		w.observeDropped(alert)
 		return false
 	}
 	select {
 	case w.queue <- alert:
+		if w.observer != nil {
+			w.observer.NotificationQueueSize(len(w.queue))
+		}
 		return true
 	default:
 		w.stats.Dropped++
+		w.observeDropped(alert)
 		return false
 	}
 }
@@ -138,24 +168,43 @@ func (w *Worker) Stats() Stats {
 }
 
 func (w *Worker) run(ctx context.Context) {
-	defer close(w.done)
+	defer func() {
+		w.stormWG.Wait()
+		close(w.done)
+	}()
 	for alert := range w.queue {
-		if !w.allow(alert) {
+		if w.observer != nil {
+			w.observer.NotificationQueueSize(len(w.queue))
+		}
+		if ctx.Err() != nil {
+			w.mu.Lock()
+			w.stats.Dropped++
+			w.mu.Unlock()
+			w.observeDropped(alert)
+			continue
+		}
+		if !w.allow(ctx, alert) {
 			continue
 		}
 		if w.send(ctx, alert) {
 			w.mu.Lock()
 			w.stats.Sent++
 			w.mu.Unlock()
+			if w.observer != nil {
+				w.observer.NotificationSent(alert)
+			}
 		} else {
 			w.mu.Lock()
 			w.stats.Failed++
 			w.mu.Unlock()
+			if w.observer != nil {
+				w.observer.NotificationFailed(alert)
+			}
 		}
 	}
 }
 
-func (w *Worker) allow(alert processor.Alert) bool {
+func (w *Worker) allow(ctx context.Context, alert processor.Alert) bool {
 	now := w.clock.Now()
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -173,26 +222,43 @@ func (w *Worker) allow(alert processor.Alert) bool {
 		return true
 	}
 	w.stats.Dropped++
+	w.observeDropped(alert)
 	if alert.RuleID == "alert-storm" || (w.stormFor > 0 && now.Before(w.stormAt.Add(w.stormFor))) {
 		return false
 	}
 	w.stormAt = now
 	w.stats.StormAlerts++
-	go w.sendStorm(alert)
+	w.stormWG.Add(1)
+	go func() {
+		defer w.stormWG.Done()
+		w.sendStorm(ctx, alert)
+	}()
 	return false
 }
 
-func (w *Worker) sendStorm(source processor.Alert) {
+func (w *Worker) observeDropped(alert processor.Alert) {
+	if w.observer != nil {
+		w.observer.NotificationDropped(alert)
+	}
+}
+
+func (w *Worker) sendStorm(ctx context.Context, source processor.Alert) {
 	storm := processor.Alert{RuleID: "alert-storm", Severity: "high", ContainerName: source.ContainerName, FirstSeen: w.clock.Now(), LastSeen: w.clock.Now(), Samples: []string{"Alert storm detected: normal alerts are rate limited."}}
-	if w.send(context.Background(), storm) {
+	if w.send(ctx, storm) {
 		w.mu.Lock()
 		w.stats.Sent++
 		w.mu.Unlock()
+		if w.observer != nil {
+			w.observer.NotificationSent(storm)
+		}
 		return
 	}
 	w.mu.Lock()
 	w.stats.Failed++
 	w.mu.Unlock()
+	if w.observer != nil {
+		w.observer.NotificationFailed(storm)
+	}
 }
 
 func (w *Worker) send(ctx context.Context, alert processor.Alert) bool {
