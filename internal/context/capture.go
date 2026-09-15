@@ -100,9 +100,15 @@ func NewAfterCollector(before []logentry.LogEntry, trigger logentry.LogEntry, co
 		collector.finish(false)
 		return collector
 	}
-	collector.timer = time.AfterFunc(config.AfterWait, func() {
+	timer := time.AfterFunc(config.AfterWait, func() {
 		collector.finish(true)
 	})
+	collector.mu.Lock()
+	collector.timer = timer
+	if collector.finished {
+		timer.Stop()
+	}
+	collector.mu.Unlock()
 	return collector
 }
 
