@@ -59,6 +59,16 @@ func (g *ReplayGate) Accept(raw logentry.RawLog) []logentry.RawLog {
 		g.buffered = nil
 		return nil
 	}
+	// Docker logs are ordered within a container. Once the stream advances
+	// beyond the checkpoint timestamp the marker cannot still arrive. Release
+	// the overlap rather than buffering a follow stream indefinitely.
+	if raw.Timestamp.After(g.checkpoint.LastTimestamp) {
+		g.looking = false
+		result := append([]logentry.RawLog(nil), g.buffered...)
+		result = append(result, raw)
+		g.buffered = nil
+		return result
+	}
 	g.buffered = append(g.buffered, raw)
 	return nil
 }

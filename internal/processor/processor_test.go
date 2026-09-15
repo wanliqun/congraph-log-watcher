@@ -111,6 +111,23 @@ func TestAfterContextAndTimeoutDoNotBlockAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestRemoveContainerDropsOldContextAndPendingAlert(t *testing.T) {
+	sink := newAlerts()
+	p := newProcessor(t, sink, testRule(t, 1, 1, time.Second), router.Default())
+	p.Process(raw("INFO old context"))
+	p.Process(raw("ERROR rpc failed"))
+	p.RemoveContainer("node")
+	if got := p.context.Len("node"); got != 0 {
+		t.Fatalf("context lines after remove = %d", got)
+	}
+	select {
+	case <-sink.notify:
+		t.Fatal("recreated container emitted old pending alert")
+	case <-time.After(20 * time.Millisecond):
+	}
+	p.Close()
+}
+
 func TestDryRunSinkIsStable(t *testing.T) {
 	var output bytes.Buffer
 	sink := NewDryRunSink(&output)

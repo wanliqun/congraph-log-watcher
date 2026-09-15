@@ -54,6 +54,7 @@ type EventState struct {
 // when the caller should construct and deliver an incident alert.
 type Result struct {
 	Alert           bool
+	Suppressed      bool
 	SuppressedCount int
 	State           EventState
 }
@@ -153,6 +154,7 @@ func (a *Aggregator) Record(event Event) (Result, error) {
 		}
 	} else if eventTime.Before(state.CooldownUntil) {
 		state.SuppressedCount++
+		result.Suppressed = true
 	} else if state.WindowCount >= event.Rule.Threshold {
 		a.raise(state, eventTime, event.Rule.Cooldown, &result)
 	}

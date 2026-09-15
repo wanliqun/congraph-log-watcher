@@ -55,6 +55,15 @@ type Config struct {
 	Rules      rule.Engine
 	Aggregator *aggregate.Aggregator
 	Sink       AlertSink
+	Observer   Observer
+}
+
+// Observer receives processing outcomes for metrics. It must not retain
+// unsanitized log content.
+type Observer interface {
+	Parsed(logentry.LogEntry)
+	RuleMatched(string)
+	Aggregated(string, aggregate.Result)
 }
 
 // Processor executes Parse → Redact → Context → Route → Match → Fingerprint
@@ -67,6 +76,7 @@ type Processor struct {
 	rules      rule.Engine
 	aggregator *aggregate.Aggregator
 	sink       AlertSink
+	observer   Observer
 
 	mu      sync.Mutex
 	sinkMu  sync.Mutex
@@ -79,6 +89,7 @@ type pendingAlert struct {
 	collector *contextbuf.AfterCollector
 	alert     Alert
 	maxBytes  int
+	discard   bool
 }
 
 // New validates the required processing dependencies.
@@ -103,6 +114,7 @@ func New(config Config) (*Processor, error) {
 		rules:      config.Rules,
 		aggregator: config.Aggregator,
 		sink:       config.Sink,
+		observer:   config.Observer,
 		pending:    make(map[string]map[*pendingAlert]struct{}),
 	}, nil
 }
@@ -121,6 +133,9 @@ func (p *Processor) Process(raw logentry.RawLog) (Ack, error) {
 	if p.redactor != nil {
 		entry = p.redactor.Redact(entry)
 	}
+	if p.observer != nil {
+		p.observer.Parsed(entry)
+	}
 
 	route := p.router.Route(entry)
 	matches := []rule.Rule(nil)
@@ -134,11 +149,17 @@ func (p *Processor) Process(raw logentry.RawLog) (Ack, error) {
 
 	var processErr error
 	for _, matched := range matches {
+		if p.observer != nil {
+			p.observer.RuleMatched(matched.ID)
+		}
 		fingerprint := matched.Fingerprint(entry)
 		result, err := p.aggregator.Record(aggregate.Event{Rule: matched, Fingerprint: fingerprint, Entry: entry})
 		if err != nil {
 			processErr = err
 			continue
+		}
+		if p.observer != nil {
+			p.observer.Aggregated(matched.ID, result)
 		}
 		if !result.Alert {
 			continue
@@ -203,7 +224,7 @@ func (p *Processor) addAfterContext(entry logentry.LogEntry) {
 func (p *Processor) awaitContext(key string, pending *pendingAlert) {
 	defer p.wait.Done()
 	capture, ok := <-pending.collector.Done()
-	if !ok {
+	if !ok || pending.discard {
 		return
 	}
 	p.mu.Lock()
@@ -240,6 +261,21 @@ func (p *Processor) Close() {
 	}
 	p.mu.Unlock()
 	p.wait.Wait()
+}
+
+// RemoveContainer releases context and pending captures when a logical
+// container is recreated with a different Docker ID.
+func (p *Processor) RemoveContainer(container string) {
+	p.mu.Lock()
+	if items := p.pending[container]; items != nil {
+		for pending := range items {
+			pending.discard = true
+			pending.collector.Cancel()
+		}
+		delete(p.pending, container)
+	}
+	p.context.Remove(container)
+	p.mu.Unlock()
 }
 
 func containerKey(entry logentry.LogEntry) string {

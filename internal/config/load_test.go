@@ -144,6 +144,14 @@ func TestExpandEnvironment(t *testing.T) {
 	}
 }
 
+func TestExampleConfigIsValid(t *testing.T) {
+	t.Setenv("DINGTALK_WEBHOOK", "https://example.test/webhook")
+	t.Setenv("DINGTALK_SECRET", "test-secret")
+	if _, err := Load(filepath.Join("..", "..", "config", "example.yaml")); err != nil {
+		t.Fatalf("example config: %v", err)
+	}
+}
+
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 
