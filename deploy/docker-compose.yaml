@@ -1,0 +1,14 @@
+services:
+  graph-log-watcher:
+    build: ..
+    command: ["run", "--config", "/etc/graph-log-watcher/config.yaml", "--dry-run"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../config/example.yaml:/etc/graph-log-watcher/config.yaml:ro
+      - watcher-state:/var/lib/graph-log-watcher
+    ports:
+      - "9108:9108"
+    healthcheck:
+      test: ["CMD", "/graph-log-watcher", "check-config", "--config", "/etc/graph-log-watcher/config.yaml"]
+volumes:
+  watcher-state:

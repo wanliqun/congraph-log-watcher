@@ -1,0 +1,14 @@
+containers: [index-node-0]
+rules:
+  - id: critical-log
+    severity: critical
+    threshold: 1
+    window: 1m
+    cooldown: 10m
+    dedup: {mode: normalized}
+    match: {levels: [CRITICAL]}
+alert:
+  channels:
+    dingtalk:
+      platform: dingtalk
+      webhook: ${DINGTALK_WEBHOOK}
