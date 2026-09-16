@@ -23,6 +23,13 @@ var allowedDedupModes = map[string]struct{}{
 	"rule":       {},
 }
 
+var allowedLogLevels = map[string]struct{}{
+	"debug": {},
+	"info":  {},
+	"warn":  {},
+	"error": {},
+}
+
 // Validate checks semantic constraints after defaults have been applied.
 func (c Config) Validate() error {
 	var validationErrors []error
@@ -30,6 +37,9 @@ func (c Config) Validate() error {
 		validationErrors = append(validationErrors, fmt.Errorf(format, args...))
 	}
 
+	if _, ok := allowedLogLevels[strings.ToLower(strings.TrimSpace(c.LogLevel))]; !ok {
+		add("log_level: unsupported level %q", c.LogLevel)
+	}
 	if strings.TrimSpace(c.Docker.Socket) == "" {
 		add("docker.socket: must not be empty")
 	}

@@ -1,3 +1,4 @@
+log_level: info
 docker:
   socket: unix:///var/run/docker.sock
 containers: [index-node-0, query-node-0]
