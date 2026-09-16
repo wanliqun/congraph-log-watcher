@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -116,6 +117,7 @@ func New(config Config) (*LogSource, error) {
 // container. It returns only after context cancellation and never closes the
 // caller-owned Output channel.
 func (s *LogSource) Run(ctx context.Context) error {
+	slog.Debug("starting Docker log source", "component", "docker", "containers", s.containers)
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
@@ -139,6 +141,7 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 	for ctx.Err() == nil {
 		container, err := s.discover(ctx, name)
 		if err != nil {
+			slog.Debug("Docker container discovery failed", "component", "docker", "container", name, "backoff", backoff, "error", err)
 			s.observeAttached(name, "", false)
 			if attachedOnce {
 				s.observeReconnect(name)
@@ -151,6 +154,7 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 		}
 		backoff = s.initial
 		attachedOnce = true
+		slog.Debug("Docker container attached", "component", "docker", "container", name, "container_id", container.ID, "tty", container.TTY)
 		s.observeAttached(name, container.ID, true)
 		streamCtx, cancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
@@ -159,10 +163,12 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 		}()
 		select {
 		case <-ctx.Done():
+			slog.Debug("stopping Docker log stream", "component", "docker", "container", name, "container_id", container.ID)
 			cancel()
 			<-done
 			return
 		case <-s.wakes[name]:
+			slog.Debug("reconnecting Docker log stream after lifecycle event", "component", "docker", "container", name, "container_id", container.ID)
 			// A lifecycle event may indicate a recreated container; force a
 			// fresh list/inspect before continuing the old stream.
 			cancel()
@@ -170,6 +176,7 @@ func (s *LogSource) runContainer(ctx context.Context, name string) {
 			s.observeAttached(name, container.ID, false)
 			s.observeReconnect(name)
 		case <-done:
+			slog.Debug("Docker log stream ended", "component", "docker", "container", name, "container_id", container.ID, "backoff", backoff)
 			// A closed log follow stream is normally a daemon or container
 			// transition. Back off before rediscovery to avoid a tight loop.
 			cancel()
@@ -202,6 +209,7 @@ func (s *LogSource) discover(ctx context.Context, name string) (Container, error
 		if !inspected.Running {
 			return Container{}, fmt.Errorf("container %q is not running", name)
 		}
+		slog.Debug("Docker container discovered", "component", "docker", "container", name, "container_id", inspected.ID, "tty", inspected.TTY)
 		return inspected, nil
 	}
 	return Container{}, fmt.Errorf("container %q not found", name)
@@ -229,6 +237,7 @@ func (s *LogSource) stream(ctx context.Context, name string, container Container
 		return err
 	}
 	defer reader.Close()
+	slog.Debug("Docker log stream opened", "component", "docker", "container", name, "container_id", container.ID, "replay_start", start, "format", map[bool]string{true: "plain", false: "multiplexed"}[container.TTY])
 	if container.TTY {
 		return decodePlain(ctx, reader, name, container.ID, s.output)
 	}
@@ -249,6 +258,7 @@ func (s *LogSource) watchEvents(ctx context.Context) {
 					continue
 				}
 				if isLifecycleAction(event.Action) {
+					slog.Debug("Docker lifecycle event", "component", "docker", "action", event.Action, "container", normalizeName(event.Name), "container_id", event.ID)
 					s.wake(normalizeName(event.Name))
 				}
 			case _, ok := <-errors:
@@ -302,6 +312,7 @@ func decodeMultiplexed(ctx context.Context, reader io.Reader, name, id string, o
 		}
 		stream := header[0]
 		length := binary.BigEndian.Uint32(header[4:])
+		slog.Debug("decoded Docker log frame", "component", "docker", "container", name, "container_id", id, "stream", streamName(stream), "bytes", length)
 		payload := make([]byte, length)
 		if _, err := io.ReadFull(reader, payload); err != nil {
 			return err
@@ -345,6 +356,7 @@ func readLines(reader io.Reader, consume func(string) error) error {
 
 func emit(ctx context.Context, output chan<- logentry.RawLog, name, id, stream, line string) error {
 	timestamp, raw := parseTimestamp(line)
+	slog.Debug("parsed Docker log record", "component", "docker", "container", name, "container_id", id, "stream", stream, "has_timestamp", !timestamp.IsZero(), "raw_bytes", len(raw), "queue_size", len(output), "queue_capacity", cap(output))
 	select {
 	case output <- logentry.RawLog{ContainerID: id, ContainerName: name, Timestamp: timestamp, Stream: stream, Raw: raw}:
 		return nil

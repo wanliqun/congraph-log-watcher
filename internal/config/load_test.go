@@ -39,6 +39,9 @@ alert:
 	if cfg.Docker.Socket != defaultDockerSocket {
 		t.Fatalf("Docker.Socket = %q, want %q", cfg.Docker.Socket, defaultDockerSocket)
 	}
+	if cfg.LogLevel != defaultLogLevel {
+		t.Fatalf("LogLevel = %q, want %q", cfg.LogLevel, defaultLogLevel)
+	}
 	if cfg.Checkpoint.ReplayOverlap.Duration() != 2*time.Second {
 		t.Fatalf("ReplayOverlap = %s", cfg.Checkpoint.ReplayOverlap)
 	}
@@ -118,6 +121,17 @@ notifier:
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load() error = %q, want substring %q", err, want)
 		}
+	}
+}
+
+func TestLoadAcceptsLogLevelAndRejectsUnsupportedLevel(t *testing.T) {
+	cfg, err := Load(writeConfig(t, validConfigYAML+"log_level: DEBUG\n"))
+	if err != nil || cfg.LogLevel != "DEBUG" {
+		t.Fatalf("Load debug log level = %#v, %v", cfg, err)
+	}
+	_, err = Load(writeConfig(t, validConfigYAML+"log_level: verbose\n"))
+	if err == nil || !strings.Contains(err.Error(), `log_level: unsupported level "verbose"`) {
+		t.Fatalf("Load unsupported log level error = %v", err)
 	}
 }
 

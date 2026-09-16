@@ -4,6 +4,7 @@ package config
 import "time"
 
 const (
+	defaultLogLevel                = "info"
 	defaultDockerSocket            = "unix:///var/run/docker.sock"
 	defaultCheckpointPath          = "/var/lib/graph-log-watcher/state.db"
 	defaultMetricsListen           = ":9108"
@@ -26,6 +27,7 @@ const (
 
 // Config is the complete service configuration.
 type Config struct {
+	LogLevel    string            `yaml:"log_level"`
 	Docker      DockerConfig      `yaml:"docker"`
 	Containers  []string          `yaml:"containers"`
 	Parser      ParserConfig      `yaml:"parser"`
@@ -168,8 +170,9 @@ type ShutdownConfig struct {
 // and can be rejected by validation instead of being mistaken for an omission.
 func DefaultConfig() Config {
 	return Config{
-		Docker: DockerConfig{Socket: defaultDockerSocket},
-		Parser: ParserConfig{Type: "graph-node"},
+		LogLevel: defaultLogLevel,
+		Docker:   DockerConfig{Socket: defaultDockerSocket},
+		Parser:   ParserConfig{Type: "graph-node"},
 		Levels: LevelsConfig{
 			Context:         []string{"INFO", "WARN", "ERROR", "CRITICAL"},
 			AlertCandidates: []string{"WARN", "ERROR", "CRITICAL"},

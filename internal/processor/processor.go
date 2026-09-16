@@ -3,6 +3,7 @@ package processor
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -133,6 +134,7 @@ func (p *Processor) Process(raw logentry.RawLog) (Ack, error) {
 	if p.redactor != nil {
 		entry = p.redactor.Redact(entry)
 	}
+	slog.Debug("parsed graph-node log", "component", "processor", "container", entry.ContainerName, "container_id", entry.ContainerID, "stream", entry.Stream, "timestamp", entry.Timestamp, "level", entry.Level.String(), "field_count", len(entry.Fields), "message_bytes", len(entry.Message))
 	if p.observer != nil {
 		p.observer.Parsed(entry)
 	}
@@ -142,6 +144,7 @@ func (p *Processor) Process(raw logentry.RawLog) (Ack, error) {
 	if route.EntersRuleEngine() || entry.Level == logentry.LevelUnknown {
 		matches = p.rules.Match(entry)
 	}
+	slog.Debug("evaluated log rules", "component", "processor", "container", entry.ContainerName, "level", entry.Level.String(), "candidate", route.EntersRuleEngine(), "matched_rules", len(matches))
 	keepsContext := route.KeepsContext() || len(matches) > 0
 	if keepsContext {
 		p.addAfterContext(entry)

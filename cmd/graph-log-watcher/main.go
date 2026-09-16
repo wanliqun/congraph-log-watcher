@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,6 +59,10 @@ func runService(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "invalid configuration: %v\n", err)
 		return 1
 	}
+	if err := configureLogger(cfg.LogLevel, stderr); err != nil {
+		fmt.Fprintf(stderr, "invalid log level: %v\n", err)
+		return 1
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := runtime.Run(ctx, cfg, *dryRun, stdout); err != nil {
@@ -65,6 +71,15 @@ func runService(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "shutdown complete")
 	return 0
+}
+
+func configureLogger(level string, output io.Writer) error {
+	var configured slog.Level
+	if err := configured.UnmarshalText([]byte(strings.ToLower(strings.TrimSpace(level)))); err != nil {
+		return err
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{Level: configured})))
+	return nil
 }
 
 func runHealthcheck(args []string, stderr io.Writer) int {

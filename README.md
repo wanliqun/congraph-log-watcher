@@ -26,6 +26,11 @@ Dry run executes parsing, redaction, matching, windowing, deduplication, cooldow
 
 ## Docker Compose
 
+Set `log_level: debug` in the configuration when diagnosing Docker ingestion. Debug
+logs show container discovery, lifecycle events, stream frames, timestamp parsing,
+queue pressure, and post-redaction parser/rule outcomes. They deliberately omit raw
+log text because it can contain credentials before redaction.
+
 ```sh
 DINGTALK_WEBHOOK='...' DINGTALK_SECRET='...' docker compose -f deploy/docker-compose.yaml up --build
 ```
