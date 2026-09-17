@@ -41,6 +41,6 @@ The Docker socket grants highly privileged host access. Mount it only into this 
 
 ## Operations
 
-Checkpoint state defaults to `/var/lib/graph-log-watcher/state.db`. Restart replay uses an overlap and a timestamp plus event-hash marker, providing at-least-once handling without persisting raw logs. A SIGINT or SIGTERM stops Docker streams, drains accepted logs, flushes checkpoints, drains the notification queue within `shutdown.timeout`, and then closes HTTP and bbolt.
+Checkpoint state defaults to `/var/lib/graph-log-watcher/state.db`. On a container's first connection without a checkpoint, `checkpoint.initial_replay_window` defaults to `5m`, limiting Docker history to the preceding five minutes; set it to `0s` to follow only new logs. Restart replay uses an overlap and a timestamp plus event-hash marker, providing at-least-once handling without persisting raw logs. A SIGINT or SIGTERM stops Docker streams, drains accepted logs, flushes checkpoints, drains the notification queue within `shutdown.timeout`, and then closes HTTP and bbolt.
 
 Keep rules ordered from specific to generic and use `stop_on_match` where categories overlap. Prefer structured fields for fingerprints, normalize volatile IDs and numbers, and keep redaction rules ahead of any context or incident state. A 503 from `/healthz`, rising notifier errors, reconnects, or a stale checkpoint gauge should be investigated before changing alert thresholds.

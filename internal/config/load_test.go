@@ -45,6 +45,9 @@ alert:
 	if cfg.Checkpoint.ReplayOverlap.Duration() != 2*time.Second {
 		t.Fatalf("ReplayOverlap = %s", cfg.Checkpoint.ReplayOverlap)
 	}
+	if cfg.Checkpoint.InitialReplayWindow.Duration() != 5*time.Minute {
+		t.Fatalf("InitialReplayWindow = %s", cfg.Checkpoint.InitialReplayWindow)
+	}
 	if cfg.Aggregation.MaxGroups != defaultMaxGroups {
 		t.Fatalf("MaxGroups = %d, want %d", cfg.Aggregation.MaxGroups, defaultMaxGroups)
 	}
@@ -132,6 +135,28 @@ func TestLoadAcceptsLogLevelAndRejectsUnsupportedLevel(t *testing.T) {
 	_, err = Load(writeConfig(t, validConfigYAML+"log_level: verbose\n"))
 	if err == nil || !strings.Contains(err.Error(), `log_level: unsupported level "verbose"`) {
 		t.Fatalf("Load unsupported log level error = %v", err)
+	}
+}
+
+func TestLoadAcceptsInitialReplayWindow(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{value: "0s", want: 0},
+		{value: "30m", want: 30 * time.Minute},
+	} {
+		cfg, err := Load(writeConfig(t, validConfigYAML+"checkpoint:\n  initial_replay_window: "+test.value+"\n"))
+		if err != nil {
+			t.Fatalf("Load initial_replay_window %q: %v", test.value, err)
+		}
+		if got := cfg.Checkpoint.InitialReplayWindow.Duration(); got != test.want {
+			t.Fatalf("InitialReplayWindow = %s, want %s", got, test.want)
+		}
+	}
+	_, err := Load(writeConfig(t, validConfigYAML+"checkpoint:\n  initial_replay_window: -1s\n"))
+	if err == nil || !strings.Contains(err.Error(), "checkpoint.initial_replay_window: must be greater than or equal to zero") {
+		t.Fatalf("Load negative initial_replay_window error = %v", err)
 	}
 }
 

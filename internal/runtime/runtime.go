@@ -55,7 +55,7 @@ func Run(ctx context.Context, cfg *config.Config, dry bool, output io.Writer) er
 	if err != nil {
 		return err
 	}
-	observer := newObserver(m, health, store, agg, cfg.Checkpoint.ReplayOverlap.Duration())
+	observer := newObserver(m, health, store, agg, cfg.Checkpoint.ReplayOverlap.Duration(), cfg.Checkpoint.InitialReplayWindow.Duration())
 
 	var worker *notify.Worker
 	var sink processor.AlertSink = processor.NewDryRunSink(output)
@@ -97,7 +97,11 @@ func Run(ctx context.Context, cfg *config.Config, dry bool, output io.Writer) er
 	defer api.Close()
 
 	logs := make(chan logentry.RawLog, cfg.Runtime.LogChannelSize)
-	source, err := docker.New(docker.Config{API: api, Containers: cfg.Containers, Output: logs, ReplayStart: observer.replayStart, Observer: observer})
+	probeInterval := cfg.Health.DockerUnavailableAfter.Duration() / 2
+	if probeInterval <= 0 {
+		probeInterval = cfg.Health.DockerUnavailableAfter.Duration()
+	}
+	source, err := docker.New(docker.Config{API: api, Containers: cfg.Containers, Output: logs, ReplayStart: observer.replayStart, HealthProbeInterval: probeInterval, Observer: observer})
 	if err != nil {
 		_ = srv.Shutdown(context.Background())
 		p.Close()
@@ -259,19 +263,22 @@ func buildNotifier(cfg *config.Config, observer *runtimeObserver) (*notify.Worke
 }
 
 type runtimeObserver struct {
-	metrics   *metrics.Metrics
-	health    *metrics.Health
-	store     *checkpoint.Store
-	agg       *aggregate.Aggregator
-	overlap   time.Duration
-	mu        sync.Mutex
-	gates     map[string]*checkpoint.ReplayGate
-	ids       map[string]string
-	processor *processor.Processor
+	metrics             *metrics.Metrics
+	health              *metrics.Health
+	store               *checkpoint.Store
+	agg                 *aggregate.Aggregator
+	overlap             time.Duration
+	initialReplayWindow time.Duration
+	now                 func() time.Time
+	mu                  sync.Mutex
+	gates               map[string]*checkpoint.ReplayGate
+	ids                 map[string]string
+	initialStarts       map[string]time.Time
+	processor           *processor.Processor
 }
 
-func newObserver(m *metrics.Metrics, h *metrics.Health, store *checkpoint.Store, agg *aggregate.Aggregator, overlap time.Duration) *runtimeObserver {
-	return &runtimeObserver{metrics: m, health: h, store: store, agg: agg, overlap: overlap, gates: make(map[string]*checkpoint.ReplayGate), ids: make(map[string]string)}
+func newObserver(m *metrics.Metrics, h *metrics.Health, store *checkpoint.Store, agg *aggregate.Aggregator, overlap, initialReplayWindow time.Duration) *runtimeObserver {
+	return &runtimeObserver{metrics: m, health: h, store: store, agg: agg, overlap: overlap, initialReplayWindow: initialReplayWindow, now: time.Now, gates: make(map[string]*checkpoint.ReplayGate), ids: make(map[string]string), initialStarts: make(map[string]time.Time)}
 }
 
 func (o *runtimeObserver) DockerAvailable() { o.health.DockerOK(time.Now()) }
@@ -311,8 +318,18 @@ func (o *runtimeObserver) replayStart(name string) time.Time {
 		return time.Time{}
 	}
 	if !ok {
-		return time.Time{}
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if start, exists := o.initialStarts[name]; exists {
+			return start
+		}
+		start := o.now().Add(-o.initialReplayWindow)
+		o.initialStarts[name] = start
+		return start
 	}
+	o.mu.Lock()
+	delete(o.initialStarts, name)
+	o.mu.Unlock()
 	return checkpoint.ReplayStart(cp, o.overlap)
 }
 func (o *runtimeObserver) filter(raw logentry.RawLog) []logentry.RawLog {

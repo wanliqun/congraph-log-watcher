@@ -9,6 +9,7 @@ levels:
 checkpoint:
   path: /var/lib/graph-log-watcher/state.db
   replay_overlap: 2s
+  initial_replay_window: 5m
   flush_interval: 1s
   flush_events: 100
 aggregation: {max_groups: 10000, group_ttl: 24h, max_samples: 3}
