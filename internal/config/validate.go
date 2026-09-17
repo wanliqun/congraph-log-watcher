@@ -57,6 +57,9 @@ func (c Config) Validate() error {
 	if c.Checkpoint.ReplayOverlap.Duration() < 0 {
 		add("checkpoint.replay_overlap: must be greater than or equal to zero")
 	}
+	if c.Checkpoint.InitialReplayWindow.Duration() < 0 {
+		add("checkpoint.initial_replay_window: must be greater than or equal to zero")
+	}
 	if c.Checkpoint.FlushInterval.Duration() <= 0 {
 		add("checkpoint.flush_interval: must be greater than zero")
 	}

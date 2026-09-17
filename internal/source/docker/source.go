@@ -41,14 +41,15 @@ type API interface {
 
 // Config configures one shared-output Docker LogSource.
 type Config struct {
-	API            API
-	Containers     []string
-	Output         chan<- logentry.RawLog
-	ReplayStarts   map[string]time.Time
-	ReplayStart    func(string) time.Time
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-	Observer       Observer
+	API                 API
+	Containers          []string
+	Output              chan<- logentry.RawLog
+	ReplayStarts        map[string]time.Time
+	ReplayStart         func(string) time.Time
+	InitialBackoff      time.Duration
+	MaxBackoff          time.Duration
+	HealthProbeInterval time.Duration
+	Observer            Observer
 }
 
 // Observer receives bounded operational state changes. Implementations must
@@ -62,14 +63,15 @@ type Observer interface {
 // LogSource reads each target container in its own goroutine. Sending to
 // Output is deliberately blocking, providing bounded-channel backpressure.
 type LogSource struct {
-	api          API
-	containers   []string
-	output       chan<- logentry.RawLog
-	replayStarts map[string]time.Time
-	replayStart  func(string) time.Time
-	initial      time.Duration
-	max          time.Duration
-	observer     Observer
+	api           API
+	containers    []string
+	output        chan<- logentry.RawLog
+	replayStarts  map[string]time.Time
+	replayStart   func(string) time.Time
+	initial       time.Duration
+	max           time.Duration
+	probeInterval time.Duration
+	observer      Observer
 
 	mu    sync.Mutex
 	wakes map[string]chan struct{}
@@ -95,6 +97,9 @@ func New(config Config) (*LogSource, error) {
 	if config.MaxBackoff < config.InitialBackoff {
 		return nil, fmt.Errorf("max backoff must not be less than initial backoff")
 	}
+	if config.HealthProbeInterval <= 0 {
+		config.HealthProbeInterval = 30 * time.Second
+	}
 	starts := make(map[string]time.Time, len(config.ReplayStarts))
 	for name, start := range config.ReplayStarts {
 		starts[name] = start
@@ -110,7 +115,7 @@ func New(config Config) (*LogSource, error) {
 		}
 		wakes[name] = make(chan struct{}, 1)
 	}
-	return &LogSource{api: config.API, containers: normalizedNames(config.Containers), output: config.Output, replayStarts: starts, replayStart: config.ReplayStart, initial: config.InitialBackoff, max: config.MaxBackoff, observer: config.Observer, wakes: wakes}, nil
+	return &LogSource{api: config.API, containers: normalizedNames(config.Containers), output: config.Output, replayStarts: starts, replayStart: config.ReplayStart, initial: config.InitialBackoff, max: config.MaxBackoff, probeInterval: config.HealthProbeInterval, observer: config.Observer, wakes: wakes}, nil
 }
 
 // Run starts lifecycle watching and one sequential stream manager per logical
@@ -124,6 +129,11 @@ func (s *LogSource) Run(ctx context.Context) error {
 		defer workers.Done()
 		s.watchEvents(ctx)
 	}()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		s.probeDocker(ctx)
+	}()
 	for _, name := range s.containers {
 		workers.Add(1)
 		go func(name string) {
@@ -133,6 +143,31 @@ func (s *LogSource) Run(ctx context.Context) error {
 	}
 	workers.Wait()
 	return ctx.Err()
+}
+
+// probeDocker periodically confirms that the Docker API remains reachable,
+// including when a followed container is healthy but produces no logs.
+func (s *LogSource) probeDocker(ctx context.Context) {
+	probe := func() {
+		if _, err := s.api.List(ctx); err != nil {
+			slog.Debug("Docker health probe failed", "component", "docker", "error", err)
+			return
+		}
+		if s.observer != nil {
+			s.observer.DockerAvailable()
+		}
+	}
+	probe()
+	ticker := time.NewTicker(s.probeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			probe()
+		}
+	}
 }
 
 func (s *LogSource) runContainer(ctx context.Context, name string) {

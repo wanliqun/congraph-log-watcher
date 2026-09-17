@@ -20,6 +20,7 @@ const (
 	defaultStormCooldown           = time.Minute
 	defaultShutdownTimeout         = 10 * time.Second
 	defaultReplayOverlap           = 2 * time.Second
+	defaultInitialReplayWindow     = 5 * time.Minute
 	defaultCheckpointFlushInterval = time.Second
 	defaultCheckpointFlushEvents   = 100
 	defaultGroupTTL                = 24 * time.Hour
@@ -59,10 +60,11 @@ type LevelsConfig struct {
 }
 
 type CheckpointConfig struct {
-	Path          string   `yaml:"path"`
-	ReplayOverlap Duration `yaml:"replay_overlap"`
-	FlushInterval Duration `yaml:"flush_interval"`
-	FlushEvents   int      `yaml:"flush_events"`
+	Path                string   `yaml:"path"`
+	ReplayOverlap       Duration `yaml:"replay_overlap"`
+	InitialReplayWindow Duration `yaml:"initial_replay_window"`
+	FlushInterval       Duration `yaml:"flush_interval"`
+	FlushEvents         int      `yaml:"flush_events"`
 }
 
 type AggregationConfig struct {
@@ -178,10 +180,11 @@ func DefaultConfig() Config {
 			AlertCandidates: []string{"WARN", "ERROR", "CRITICAL"},
 		},
 		Checkpoint: CheckpointConfig{
-			Path:          defaultCheckpointPath,
-			ReplayOverlap: Duration(defaultReplayOverlap),
-			FlushInterval: Duration(defaultCheckpointFlushInterval),
-			FlushEvents:   defaultCheckpointFlushEvents,
+			Path:                defaultCheckpointPath,
+			ReplayOverlap:       Duration(defaultReplayOverlap),
+			InitialReplayWindow: Duration(defaultInitialReplayWindow),
+			FlushInterval:       Duration(defaultCheckpointFlushInterval),
+			FlushEvents:         defaultCheckpointFlushEvents,
 		},
 		Aggregation: AggregationConfig{
 			MaxGroups:  defaultMaxGroups,

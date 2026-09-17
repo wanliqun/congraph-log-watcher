@@ -114,6 +114,58 @@ func TestNewRejectsInvalidBounds(t *testing.T) {
 	}
 }
 
+func TestProbeDockerRefreshesAvailabilityAndStopsOnCancellation(t *testing.T) {
+	api := &fakeAPI{}
+	observer := &recordingObserver{available: make(chan struct{}, 3)}
+	source, err := New(Config{API: api, Containers: []string{"node"}, Output: make(chan logentry.RawLog), HealthProbeInterval: time.Millisecond, Observer: observer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		source.probeDocker(ctx)
+		close(done)
+	}()
+	for range 2 {
+		select {
+		case <-observer.available:
+		case <-time.After(time.Second):
+			cancel()
+			t.Fatal("Docker probe did not report availability")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Docker probe did not stop after cancellation")
+	}
+}
+
+func TestProbeDockerDoesNotReportFailedAPI(t *testing.T) {
+	api := &fakeAPI{listErr: errors.New("Docker unavailable")}
+	observer := &recordingObserver{available: make(chan struct{}, 1)}
+	source, err := New(Config{API: api, Containers: []string{"node"}, Output: make(chan logentry.RawLog), HealthProbeInterval: time.Hour, Observer: observer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		source.probeDocker(ctx)
+		close(done)
+	}()
+	select {
+	case <-observer.available:
+		cancel()
+		t.Fatal("failed Docker probe reported availability")
+	case <-time.After(10 * time.Millisecond):
+	}
+	cancel()
+	<-done
+}
+
 func TestSDKClientUsesReadOnlyDockerHTTPAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		path := request.URL.Path
@@ -181,14 +233,29 @@ type fakeAPI struct {
 	inspected    map[string]Container
 	logs         map[string]string
 	events       chan Event
+	listErr      error
 	inspectCalls int
 }
 
 func (f *fakeAPI) List(context.Context) ([]Container, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return append([]Container(nil), f.containers...), nil
 }
+
+type recordingObserver struct{ available chan struct{} }
+
+func (o *recordingObserver) DockerAvailable() {
+	select {
+	case o.available <- struct{}{}:
+	default:
+	}
+}
+func (*recordingObserver) ContainerAttached(string, string, bool) {}
+func (*recordingObserver) ContainerReconnect(string)              {}
 func (f *fakeAPI) Inspect(_ context.Context, id string) (Container, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
